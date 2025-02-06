@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Ruleta de Presentaciones</title>
+  <!-- Incluir GSAP para animaciones -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.5/gsap.min.js"></script>
+  <!-- Incluir canvas-confetti para efectos de confetti -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/canvas-confetti/1.5.1/confetti.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f0f0f0;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+    }
+    .container {
+      max-width: 1200px;
+      margin: auto;
+      background: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    /* Contenedor principal en dos columnas */
+    #mainContent {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+    }
+    /* Columna izquierda para controles */
+    #controls {
+      flex: 1;
+    }
+    /* Columna derecha para la ruleta */
+    #rouletteSection {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    /* Secciones internas de controles */
+    #inputSection, #listSection, #winnerSection {
+      margin-bottom: 20px;
+    }
+    input[type="text"] {
+      padding: 8px;
+      width: 80%;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    button {
+      padding: 8px 16px;
+      border: none;
+      background: #007BFF;
+      color: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    li {
+      background: #e9e9e9;
+      margin: 5px;
+      padding: 5px 10px;
+      border-radius: 4px;
+    }
+    /* Contenedor de la ruleta (para superponer elementos) */
+    #wheelContainer {
+      position: relative;
+      display: inline-block;
+    }
+    #wheelCanvas {
+      border: 2px solid #333;
+      border-radius: 50%;
+      background: #222;
+      display: block;
+    }
+    /* Mensaje cuando no se han agregado nombres */
+    #emptyMessage {
+      position: absolute;
+      top: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      color: white;
+      font-size: 20px;
+      z-index: 15;
+      pointer-events: none;
+    }
+    /* Puntero (mirilla) apuntando hacia abajo */
+    #pointer {
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 20px solid transparent;
+      border-right: 20px solid transparent;
+      border-top: 30px solid red;
+      z-index: 10;
+    }
+    /* Botón central para girar la ruleta */
+    #spinButton {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background-color: #007BFF;
+      border: none;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Ruleta de Presentaciones</h1>
+    <div id="mainContent">
+      <!-- Columna izquierda: controles y listado -->
+      <div id="controls">
+        <div id="inputSection">
+          <input type="text" id="nameInput" placeholder="Ingresa un nombre">
+          <br>
+          <button id="addNameButton">Agregar Nombre</button>
+        </div>
+        <div id="listSection">
+          <h3>Nombres Registrados</h3>
+          <ul id="nameList"></ul>
+        </div>
+        <div id="winnerSection">
+          <h2 id="winnerDisplay"></h2>
+          <button id="removeWinnerButton">Eliminar Ganador</button>
+        </div>
+      </div>
+      <!-- Columna derecha: ruleta -->
+      <div id="rouletteSection">
+        <div id="wheelContainer">
+          <canvas id="wheelCanvas" width="500" height="500"></canvas>
+          <div id="emptyMessage">Agrega nombres para empezar</div>
+          <div id="pointer"></div>
+          <!-- Botón para girar -->
+          <button id="spinButton">GIRAR</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Variables globales y elementos del DOM
+    let names = [];
+    const nameInput = document.getElementById("nameInput");
+    const addNameButton = document.getElementById("addNameButton");
+    const nameList = document.getElementById("nameList");
+    const spinButton = document.getElementById("spinButton");
+    const winnerDisplay = document.getElementById("winnerDisplay");
+    const removeWinnerButton = document.getElementById("removeWinnerButton");
+    const canvas = document.getElementById("wheelCanvas");
+    const context = canvas.getContext("2d");
+    const emptyMessage = document.getElementById("emptyMessage");
+
+    // Variables para animar el ganador
+    let winnerIndex = null;    // Índice del segmento ganador
+    let winnerScale = 1;       // Factor de escala para el texto del ganador
+    let highlightAlpha = 0;    // Opacidad para el overlay que ilumina el segmento
+    // Estado de la ruleta
+    let wheelState = { rotation: 0 };
+
+    // Función para agregar un nombre, actualizar lista y redibujar la ruleta
+    function addName() {
+      const name = nameInput.value.trim();
+      if (name === "") return;
+      if (names.includes(name)) {
+        alert("El nombre ya existe.");
+        return;
+      }
+      names.push(name);
+      nameInput.value = "";
+      updateNameList();
+      drawWheel();
+    }
+
+    // Actualiza el listado visual
+    function updateNameList() {
+      nameList.innerHTML = "";
+      names.forEach(name => {
+        const li = document.createElement("li");
+        li.textContent = name;
+        nameList.appendChild(li);
+      });
+    }
+
+    // Función para dibujar la ruleta en el canvas
+    function drawWheel() {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      const radius = Math.min(centerX, centerY) - 10;
+      
+      // Si no hay nombres, se muestra el mensaje y se pinta fondo uniforme
+      if (names.length === 0) {
+        emptyMessage.style.display = "block";
+        context.fillStyle = "#222";
+        context.beginPath();
+        context.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+        context.fill();
+        return;
+      } else {
+        emptyMessage.style.display = "none";
+      }
+      
+      context.save();
+      context.translate(centerX, centerY);
+      context.rotate(wheelState.rotation);
+      const segmentAngle = (2 * Math.PI) / names.length;
+      
+      for (let i = 0; i < names.length; i++) {
+        const startAngle = i * segmentAngle;
+        const endAngle = startAngle + segmentAngle;
+        // Dibujar el segmento
+        context.beginPath();
+        context.moveTo(0, 0);
+        context.arc(0, 0, radius, startAngle, endAngle);
+        context.closePath();
+        context.fillStyle = `hsl(${(i * 360 / names.length)}, 70%, 50%)`;
+        context.fill();
+        context.strokeStyle = "white";
+        context.lineWidth = 2;
+        context.stroke();
+        
+        // Si es el segmento ganador, dibujar overlay con opacidad animada
+        if (i === winnerIndex) {
+          context.save();
+          context.fillStyle = `rgba(255, 255, 0, ${highlightAlpha})`;
+          context.beginPath();
+          context.moveTo(0, 0);
+          context.arc(0, 0, radius, startAngle, endAngle);
+          context.closePath();
+          context.fill();
+          context.restore();
+        }
+        
+        // Dibujar el texto: si es el ganador se aplica zoom (modificando la fuente)
+        const textAngle = startAngle + segmentAngle / 2;
+        context.save();
+        context.rotate(textAngle);
+        context.textAlign = "right";
+        context.fillStyle = "white";
+        // Si es el ganador, se aumenta el tamaño de la fuente según winnerScale
+        if (i === winnerIndex) {
+          context.font = `bold ${16 * winnerScale}px sans-serif`;
+        } else {
+          context.font = "bold 16px sans-serif";
+        }
+        context.fillText(names[i], radius - 10, 5);
+        context.restore();
+      }
+      context.restore();
+      
+      // Dibujar el círculo central decorativo
+      context.beginPath();
+      context.arc(centerX, centerY, 30, 0, 2 * Math.PI);
+      context.fillStyle = "black";
+      context.fill();
+      context.lineWidth = 2;
+      context.strokeStyle = "white";
+      context.stroke();
+    }
+
+    // Función para simular fuegos artificiales (usando canvas-confetti)
+    function startFireworks() {
+      const duration = 5000;
+      const animationEnd = Date.now() + duration;
+      const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 1000 };
+
+      const interval = setInterval(() => {
+        const timeLeft = animationEnd - Date.now();
+        if (timeLeft <= 0) {
+          clearInterval(interval);
+          return;
+        }
+        const particleCount = 50 * (timeLeft / duration);
+        confetti(Object.assign({}, defaults, {
+          particleCount,
+          origin: { x: Math.random(), y: Math.random() - 0.2 }
+        }));
+      }, 250);
+    }
+
+    // Función para animar el ganador (zoom en el texto y resaltar la porción)
+    function animateWinner() {
+      // Animar el zoom del texto
+      let zoomObj = { scale: 0.5 };
+      gsap.to(zoomObj, {
+        scale: 1.2,
+        duration: 0.5,
+        yoyo: true,
+        repeat: 1,
+        ease: "power2.out",
+        onUpdate: () => {
+          winnerScale = zoomObj.scale;
+          drawWheel();
+        }
+      });
+      // Animar el overlay del segmento
+      let highlightObj = { alpha: 0 };
+      gsap.to(highlightObj, {
+        alpha: 0.7,
+        duration: 0.5,
+        yoyo: true,
+        repeat: 1,
+        ease: "power2.out",
+        onUpdate: () => {
+          highlightAlpha = highlightObj.alpha;
+          drawWheel();
+        }
+      });
+    }
+
+    // Función para girar la ruleta
+    function spinWheel() {
+      if (names.length === 0) return;
+      
+      const spins = 5;
+      const segmentAngle = (2 * Math.PI) / names.length;
+      const randomIndex = Math.floor(Math.random() * names.length);
+      
+      // Calcular el ángulo objetivo para que el segmento ganador quede en la parte superior (donde apunta la mirilla)
+      let targetAngle = -Math.PI / 2 - (randomIndex * segmentAngle + segmentAngle / 2);
+      targetAngle = ((targetAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      
+      const currentMod = wheelState.rotation % (2 * Math.PI);
+      const finalRotation = wheelState.rotation + spins * 2 * Math.PI + targetAngle - currentMod;
+      
+      gsap.to(wheelState, {
+        duration: 5,
+        rotation: finalRotation,
+        ease: "power4.out",
+        onUpdate: drawWheel,
+        onComplete: () => {
+          winnerIndex = randomIndex;
+          winnerDisplay.textContent = "Ganador: " + names[randomIndex];
+          // Disparo inicial de confetti y fuego artificiales
+          confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+          startFireworks();
+          // Animar zoom y el overlay en el segmento ganador
+          animateWinner();
+        }
+      });
+    }
+
+    // Función para eliminar el nombre ganador de la lista
+    function removeWinner() {
+      const winnerText = winnerDisplay.textContent;
+      if (winnerText.startsWith("Ganador: ")) {
+        const winnerName = winnerText.replace("Ganador: ", "").trim();
+        const index = names.indexOf(winnerName);
+        if (index > -1) {
+          names.splice(index, 1);
+          updateNameList();
+          // Reiniciar estado
+          wheelState.rotation = 0;
+          winnerIndex = null;
+          winnerScale = 1;
+          highlightAlpha = 0;
+          drawWheel();
+          winnerDisplay.textContent = "";
+        }
+      }
+    }
+
+    // Asignar eventos
+    addNameButton.addEventListener("click", addName);
+    spinButton.addEventListener("click", spinWheel);
+    removeWinnerButton.addEventListener("click", removeWinner);
+    nameInput.addEventListener("keyup", (e) => {
+      if (e.key === "Enter") addName();
+    });
+
+    // Dibuja el estado inicial
+    drawWheel();
+  </script>
+</body>
+</html>
